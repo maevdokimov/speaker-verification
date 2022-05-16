@@ -97,14 +97,11 @@ class ResNet(NeuralModule):
         layers (List[int]): classical ResNet architecture consists of 4 main layers.
             Number of blocks in each layer. E.g. ResNet34 - [3, 4, 6, 3]
         num_filters (List[int]): model depth at each layer. Length must be equal to layers
+        n_mels (int): height of spectrogram
+        output_dim (int): dimension of output embeddings
     """
 
-    def __init__(
-        self,
-        block: str,
-        layers: List[int],
-        num_filters: List[int],
-    ):
+    def __init__(self, block: str, layers: List[int], num_filters: List[int], n_mels: int, output_dim: int):
         super().__init__()
 
         if len(num_filters) != len(layers):
@@ -120,6 +117,8 @@ class ResNet(NeuralModule):
         self.norm_layer = nn.BatchNorm2d
         self.layers = layers
         self.num_filters = num_filters
+        self.n_mels = n_mels
+        self.output_dim = output_dim
 
         self.conv1 = DilatedConvNorm(1, num_filters[0], kernel_size=3, forward_padding=2, side_padding=1, bias=False)
         self.bn1 = self.norm_layer(num_filters[0])
@@ -154,6 +153,8 @@ class ResNet(NeuralModule):
             apply_downsample=True,
         )
 
+        self.conv2 = nn.Conv1d((n_mels // COMPRESSION_FACTOR) * num_filters[3], output_dim, kernel_size=1)
+
     def _make_layer(
         self,
         block: Union[ResNetBlock, BottleneckBlock],
@@ -180,7 +181,7 @@ class ResNet(NeuralModule):
     @property
     def output_types(self):
         return {
-            "outputs": NeuralType(("B", "D", "T"), AcousticEncodedRepresentation()),
+            "encoder_outputs": NeuralType(("B", "D", "T"), AcousticEncodedRepresentation()),
             "encoded_lengths": NeuralType(tuple("B"), LengthsType()),
         }
 
@@ -196,7 +197,8 @@ class ResNet(NeuralModule):
         x = self.layer3(x)
         x = self.layer4(x)
 
-        outputs = x.reshape(x.shape[0], -1, x.shape[-1])
+        x = x.reshape(x.shape[0], -1, x.shape[-1])
+        encoder_outputs = self.conv2(x)
         length = torch.div(length, COMPRESSION_FACTOR, rounding_mode="floor")
 
-        return outputs, length
+        return encoder_outputs, length
