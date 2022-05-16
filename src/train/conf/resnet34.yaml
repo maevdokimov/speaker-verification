@@ -1,0 +1,100 @@
+name: ???
+
+train_dataset: ???
+validation_dataset: ???
+num_classes: ???
+sample_rate: 16000
+n_mels: 80
+
+model:
+  train_ds:
+    dataset:
+      _target_: nemo.collections.asr.data.audio_to_label.AudioToSpeechLabelDataset
+      manifest_filepath: ${train_dataset}
+      labels: null
+      max_duration: null
+      min_duration: 0.25
+      time_length: 8
+    collate_fn: fixed_seq_collate_fn
+    sample_rate: ${sample_rate}
+    dataloader_params:
+      batch_size: 64
+      drop_last: false
+      shuffle: true
+      num_workers: 2
+
+  validation_ds:
+    dataset:
+      _target_: nemo.collections.asr.data.audio_to_label.AudioToSpeechLabelDataset
+      manifest_filepath: ${validation_dataset}
+      labels: null
+      max_duration: null
+      min_duration: 0.25
+      time_length: 8
+    collate_fn: fixed_seq_collate_fn
+    sample_rate: ${sample_rate}
+    dataloader_params:
+      batch_size: 64
+      drop_last: false
+      shuffle: false
+      num_workers: 2
+
+  preprocessor:
+    _target_: nemo.collections.asr.modules.AudioToMelSpectrogramPreprocessor
+    normalize: "per_feature"
+    window_size: 0.025
+    sample_rate: ${sample_rate}
+    window_stride: 0.01
+    window: "hann"
+    features: ${n_mels}
+    n_fft: 512
+    frame_splicing: 1
+    dither: 0.00001
+    stft_conv: false
+
+  encoder:
+    _target_: src.modules.resnet.ResNet
+    block: ResNetBlock
+    layers: [3, 4, 6, 3]
+    num_filters: [32, 64, 128, 256]
+    n_mels: ${n_mels}
+    output_dim: 256
+
+  decoder:
+    _target_: src.modules.pooling_layers.AttentivePoolingLayer
+    input_dim: 256
+    intermediate_dim: 256
+    num_classes: ${num_classes}
+    angular: true
+
+  loss:
+    _target_: nemo.collections.asr.losses.AngularSoftmaxLoss
+    scale: 30
+    margin: 0.2
+
+  optim:
+    name: adam
+    lr: 0.0003
+
+    sched:
+      name: CosineAnnealing
+      warmup_ratio: 0.1
+      min_lr: 0.00001
+
+trainer:
+  gpus: 1
+  max_steps: ???
+  accelerator: ddp
+  accumulate_grad_batches: 1
+  checkpoint_callback: False  # Provided by exp_manager
+  logger: False  # Provided by exp_manager
+  gradient_clip_val: 1.0
+  flush_logs_every_n_steps: 1000
+  log_every_n_steps: 50
+  check_val_every_n_epoch: 1
+
+exp_manager:
+  exp_dir: null
+  name: ${name}
+  create_tensorboard_logger: True
+  create_checkpoint_callback: True
