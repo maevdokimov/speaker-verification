@@ -2,7 +2,9 @@ name: ???
 
 train_dataset: ???
 validation_dataset: ???
+noise_manifest: ???
 num_classes: ???
+
 sample_rate: 16000
 n_mels: 80
 
@@ -22,6 +24,13 @@ model:
       drop_last: false
       shuffle: true
       num_workers: 2
+    augmentor:
+      noise:
+        prob: 0.5
+        manifest_path: ${noise_manifest}
+        min_snr_db: 0
+        max_snr_db: 30
+        orig_sr: 16000
 
   validation_ds:
     dataset:
