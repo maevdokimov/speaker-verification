@@ -70,16 +70,16 @@ model:
     output_dim: 256
 
   decoder:
-    _target_: src.modules.pooling_layers.AttentivePoolingLayer
+    _target_: src.modules.pooling_layers.LDEPoolingLayer
     input_dim: 256
-    intermediate_dim: 256
+    num_clusters: 32
     num_classes: ${num_classes}
-    angular: true
+    loss_type: AAS
 
   loss:
     _target_: nemo.collections.asr.losses.AngularSoftmaxLoss
     scale: 30
-    margin: 0.2
+    margin: 0.4
 
   optim:
     name: adam
