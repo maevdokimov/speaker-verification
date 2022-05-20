@@ -7,7 +7,7 @@ from pathlib import Path
 import sox
 
 
-def _depth_two_wav_files(base_path):
+def _depth_two_audio_files(base_path, allowed_suffixes=[".wav", ".m4a"]):
     files = []
 
     for subdir in base_path.iterdir():
@@ -15,7 +15,7 @@ def _depth_two_wav_files(base_path):
             continue
 
         for wav_file in subdir.iterdir():
-            if wav_file.suffix != ".wav":
+            if wav_file.suffix not in allowed_suffixes:
                 continue
 
             files.append(wav_file)
@@ -26,8 +26,8 @@ def _depth_two_wav_files(base_path):
 def create_noise_manifest(root_path, output_manifest_path):
     noise_path, music_path = root_path / "noise", root_path / "music"
 
-    noise_files = _depth_two_wav_files(noise_path)
-    music_files = _depth_two_wav_files(music_path)
+    noise_files = _depth_two_audio_files(noise_path)
+    music_files = _depth_two_audio_files(music_path)
 
     with open(output_manifest_path, "w") as file:
         for wav_file in noise_files + music_files:
