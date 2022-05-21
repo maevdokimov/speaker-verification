@@ -63,7 +63,7 @@ model:
 
   encoder:
     _target_: src.modules.resnet.ResNet
-    block: ResNetBlock
+    blocks: [SEResNetBlock, SEResNetBlock, ResNetBlock, ResNetBlock]
     layers: [3, 4, 6, 3]
     num_filters: [32, 64, 128, 256]
     n_mels: ${n_mels}
