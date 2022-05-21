@@ -2,34 +2,13 @@ from typing import List, Union
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from nemo.core.classes import NeuralModule, typecheck
 from nemo.core.neural_types.elements import AcousticEncodedRepresentation, LengthsType, MelSpectrogramType
 from nemo.core.neural_types.neural_type import NeuralType
 
+from src.modules.submodules import DilatedConvNorm, SELayer
+
 COMPRESSION_FACTOR = 8
-
-
-class DilatedConvNorm(nn.Module):
-    def __init__(
-        self, in_channels, out_channels, kernel_size, forward_padding=0, side_padding=0, pad_value=0.0, **kwargs
-    ):
-        super().__init__()
-
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, **kwargs)
-        nn.init.kaiming_normal_(self.conv.weight, mode="fan_out", nonlinearity="relu")
-
-        self.pad_value = pad_value
-        self.pad_size = forward_padding, 0, side_padding, side_padding
-
-    def forward(self, x: torch.Tensor):
-        """
-        Args:
-            x (torch.Tensor): batch x channels x D x T
-        """
-        x = F.pad(x, self.pad_size, "constant", self.pad_value)
-
-        return self.conv(x)
 
 
 class ResNetBlock(nn.Module):
@@ -85,15 +64,51 @@ class ResNetBlock(nn.Module):
         return out
 
 
-class BottleneckBlock(nn.Module):
-    pass
+class SEResNetBlock(ResNetBlock):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        apply_downsample: bool,
+        norm_layer: nn.Module = nn.BatchNorm2d,
+        reduction: int = 4,
+    ):
+        super().__init__(
+            in_features=in_features,
+            out_features=out_features,
+            apply_downsample=apply_downsample,
+            norm_layer=norm_layer,
+        )
+
+        self.se_layer = SELayer(out_features, reduction)
+
+    def forward(self, x):
+        if self.apply_downsample:
+            x = self.maxpool(x)
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.se_layer(out)
+
+        if self.different_depth:
+            identity = self.conv3(x)
+
+        out += identity
+        out = self.relu(out)
+
+        return out
 
 
 class ResNet(NeuralModule):
     """
     ResNet module for spectrogram representation extraction
     Args:
-        block (str): classname of ResNet building block
+        blocks (str): classnames of ResNet building blocks
         layers (List[int]): classical ResNet architecture consists of 4 main layers.
             Number of blocks in each layer. E.g. ResNet34 - [3, 4, 6, 3]
         num_filters (List[int]): model depth at each layer. Length must be equal to layers
@@ -101,18 +116,22 @@ class ResNet(NeuralModule):
         output_dim (int): dimension of output embeddings
     """
 
-    def __init__(self, block: str, layers: List[int], num_filters: List[int], n_mels: int, output_dim: int):
+    def __init__(self, blocks: List[str], layers: List[int], num_filters: List[int], n_mels: int, output_dim: int):
         super().__init__()
 
         if len(num_filters) != len(layers):
-            raise ValueError(f"Incorrect layers <-> num_filters lengths: " f"{len(num_filters)}, {len(layers)}")
+            raise ValueError(f"Incorrect layers <-> num_filters lengths: " f"{len(layers)}, {len(num_filters)}")
+        if len(blocks) != len(num_filters):
+            raise ValueError(f"Incorrect blocks <-> num_filters lengths: " f"{len(blocks)}, {len(num_filters)}")
 
-        if block == "ResNetBlock":
-            self.block = ResNetBlock
-        elif block == "BottleneckBlock":
-            self.block = BottleneckBlock
-        else:
-            raise ValueError(f"Unknown block type: {block}")
+        self.blocks = []
+        for block in blocks:
+            if block == "ResNetBlock":
+                self.blocks.append(ResNetBlock)
+            elif block == "SEResNetBlock":
+                self.blocks.append(SEResNetBlock)
+            else:
+                raise ValueError(f"Unknown block type: {block}")
 
         self.norm_layer = nn.BatchNorm2d
         self.layers = layers
@@ -125,28 +144,28 @@ class ResNet(NeuralModule):
         self.relu = nn.ReLU()
 
         self.layer1 = self._make_layer(
-            self.block,
+            self.blocks[0],
             in_features=num_filters[0],
             out_features=num_filters[0],
             n_blocks=layers[0],
             apply_downsample=False,
         )
         self.layer2 = self._make_layer(
-            self.block,
+            self.blocks[1],
             in_features=num_filters[0],
             out_features=num_filters[1],
             n_blocks=layers[1],
             apply_downsample=True,
         )
         self.layer3 = self._make_layer(
-            self.block,
+            self.blocks[2],
             in_features=num_filters[1],
             out_features=num_filters[2],
             n_blocks=layers[2],
             apply_downsample=True,
         )
         self.layer4 = self._make_layer(
-            self.block,
+            self.blocks[3],
             in_features=num_filters[2],
             out_features=num_filters[3],
             n_blocks=layers[3],
@@ -157,7 +176,7 @@ class ResNet(NeuralModule):
 
     def _make_layer(
         self,
-        block: Union[ResNetBlock, BottleneckBlock],
+        block: Union[ResNetBlock, SEResNetBlock],
         in_features: int,
         out_features: int,
         n_blocks: int,
